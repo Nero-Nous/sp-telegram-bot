@@ -3,8 +3,10 @@ import logging
 import asyncio
 import re
 import time
+import threading
 import requests
 from typing import Dict, Any
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -16,13 +18,29 @@ from telegram.ext import (
 )
 
 # ==========================================
+# FLASK DUMMY SERVER (FOR RENDER FREE TIER)
+# ==========================================
+web_app = Flask(__name__)
+
+@web_app.route("/")
+def health_check():
+    return "Bot is running live!", 200
+
+def start_flask_server():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
+
+# ==========================================
 # ENVIRONMENT VARIABLES
 # ==========================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
 PLISIO_API_KEY = os.environ.get("PLISIO_API_KEY")
-BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "https://i.postimg.cc/d3tvHSJf/Picsart-26-08-27-15-27-57-869.jpg")
+BANNER_IMAGE_URL = os.environ.get(
+    "BANNER_IMAGE_URL",
+    "https://i.postimg.cc/d3tvHSJf/Picsart-26-08-27-15-27-57-869.jpg"
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -486,22 +504,23 @@ def main():
         logger.error("BOT_TOKEN is missing! Set it in Render Environment variables.")
         return
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Start Flask dummy web server on a background thread for Render Free Tier
+    threading.Thread(target=start_flask_server, daemon=True).start()
 
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CallbackQueryHandler(button_callback_handler))
-    app.add_handler(
-        MessageHandler(
-            filters.ALL & ~filters.COMMAND, universal_message_handler
-        )
+    # Initialize Telegram Application
+    telegram_app = Application.builder().token(BOT_TOKEN).build()
+
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(CallbackQueryHandler(button_callback_handler))
+    telegram_app.add_handler(
+        MessageHandler(filters.ALL & ~filters.COMMAND, universal_message_handler)
     )
 
     logger.info("SP Assistant Bot started successfully.")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    app.run_polling(close_loop=False)
+    telegram_app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
-            
