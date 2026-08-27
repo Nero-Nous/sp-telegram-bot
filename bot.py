@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 import re
 import time
 import threading
@@ -323,9 +322,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update_admin_log_card(context, user.id, user_handle, "<i>[User started the bot]</i>")
 
-    await context.bot.send_chat_action(chat_id=user.id, action="typing")
-    await asyncio.sleep(15)
-
     welcome_text_2 = (
         "Feel free to type and ask me any questions, I reply to all DMs as soon as possible!\n\n"
         "To help me serve you best and get you set up, please select your experience level below:"
@@ -485,9 +481,6 @@ async def universal_message_handler(update: Update, context: ContextTypes.DEFAUL
         state["last_intent_time"] = current_time
         state["unmatched_count"] = 0
 
-        await context.bot.send_chat_action(chat_id=user.id, action="typing")
-        await asyncio.sleep(20)
-
         await update.message.reply_text(matched_response)
         await update_admin_log_card(context, user.id, user_handle, f"<b>Bot:</b> {matched_response}")
         return
@@ -504,10 +497,10 @@ def main():
         logger.error("BOT_TOKEN is missing! Set it in Render Environment variables.")
         return
 
-    # Start Flask dummy web server on a background thread for Render Free Tier
+    # Start Flask dummy web server on a background thread
     threading.Thread(target=start_flask_server, daemon=True).start()
 
-    # Initialize Telegram Application
+    # Build and start Telegram Application cleanly
     telegram_app = Application.builder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start_command))
@@ -517,10 +510,9 @@ def main():
     )
 
     logger.info("SP Assistant Bot started successfully.")
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    telegram_app.run_polling(close_loop=False)
+    
+    # Simple, standard polling start without loop overrides
+    telegram_app.run_polling()
 
 if __name__ == "__main__":
     main()
