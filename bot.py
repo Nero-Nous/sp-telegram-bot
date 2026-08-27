@@ -3,6 +3,7 @@ import logging
 import re
 import time
 import threading
+import asyncio
 import requests
 from typing import Dict, Any
 from flask import Flask
@@ -497,10 +498,17 @@ def main():
         logger.error("BOT_TOKEN is missing! Set it in Render Environment variables.")
         return
 
-    # Start Flask dummy web server on a background thread
+    # 1. Start Flask dummy web server on a background thread
     threading.Thread(target=start_flask_server, daemon=True).start()
 
-    # Build and start Telegram Application cleanly
+    # 2. Fix asyncio event loop for Python 3.10+ main thread execution
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 3. Build and start Telegram Application cleanly
     telegram_app = Application.builder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start_command))
@@ -511,7 +519,7 @@ def main():
 
     logger.info("SP Assistant Bot started successfully.")
     
-    # Simple, standard polling start without loop overrides
+    # 4. Run polling with explicit loop configuration
     telegram_app.run_polling()
 
 if __name__ == "__main__":
