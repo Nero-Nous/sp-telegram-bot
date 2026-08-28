@@ -8,6 +8,7 @@ import requests
 from typing import Dict, Any
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -18,7 +19,7 @@ from telegram.ext import (
 )
 
 # ==========================================
-# FLASK DUMMY SERVER (FOR RENDER FREE TIER)
+# FLASK DUMMY SERVER (FOR RENDER KEEP-ALIVE)
 # ==========================================
 web_app = Flask(__name__)
 
@@ -31,11 +32,10 @@ def start_flask_server():
     web_app.run(host="0.0.0.0", port=port)
 
 # ==========================================
-# ENVIRONMENT VARIABLES
+# ENVIRONMENT VARIABLES & LOGGING
 # ==========================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
-CHANNEL_ID = os.environ.get("CHANNEL_ID")
 PLISIO_API_KEY = os.environ.get("PLISIO_API_KEY")
 BANNER_IMAGE_URL = os.environ.get(
     "BANNER_IMAGE_URL",
@@ -47,6 +47,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# State and session storage
 user_data_store: Dict[int, Dict[str, Any]] = {}
 
 def get_user_state(user_id: int) -> Dict[str, Any]:
@@ -57,175 +58,30 @@ def get_user_state(user_id: int) -> Dict[str, Any]:
             "price": 200,
             "admin_card_id": None,
             "card_history": [],
+            "temp_alert_ids": [],
             "last_intent": None,
             "last_intent_time": 0,
-            "unmatched_count": 0,
         }
     return user_data_store[user_id]
 
-FAQ_KNOWLEDGE_BASE = [
-    {
-        "intent": "pricing_general",
-        "triggers": [r"\bprice\b", r"\bcost\b", r"\bfee\b", r"\bamount\b", r"how much", r"\brate\b", r"\bcharges\b"],
-        "response": "SP Trading current rates. Select your desired service in the main menu to generate a direct checkout link for the Ember Promo ($200 for most services, or $800 for 1-on-1 Mentorship)."
-    },
-    {
-        "intent": "ember_promo_duration",
-        "triggers": [r"until when", r"ember promo", r"limited time", r"september", r"october", r"november", r"december"],
-        "response": "Promo pricing covers your full access for September, October, November, and December. Registration is time-limited."
-    },
-    {
-        "intent": "discount_request",
-        "triggers": [r"\bdiscount\b", r"\bcheaper\b", r"any reduction", r"lower price"],
-        "response": "These rates ($200 / $800) are already the maximal Ember Discount. They are the lowest rates I will offer for the remainder of the year."
-    },
-    {
-        "intent": "installment_plan",
-        "triggers": [r"split payment", r"deposit first", r"pay in parts", r"installment"],
-        "response": "To maintain these deeply discounted promotional rates, I require full payment upfront. I do not offer installment plans for the Ember Promo."
-    },
-    {
-        "intent": "promo_pricing_structure",
-        "triggers": [r"all services \$?200", r"is the promo for each", r"individual price", r"total price"],
-        "response": "The Ember Promo of $200 applies to each individual service (VIP Signals, Group Mentorship, Prop Support, Weekly Analysis) for the entire 4-month period. My 1-on-1 Mentorship is $800 for the same period. Select your service in the menu to see the precise price."
-    },
-    {
-        "intent": "signals_content",
-        "triggers": [r"signals channel", r"included in signals", r"what do i get in vip"],
-        "response": "Includes 3 to 5 daily High-Confluence Gold setups, real-time trade updates, weekend market reviews, and periodic Group Calls to break down the logic."
-    },
-    {
-        "intent": "signals_frequency",
-        "triggers": [r"daily signals", r"per day", r"trades a day", r"which sessions", r"time zones"],
-        "response": "3 to 5 setups daily, primarily on Gold. I focus on high-volume market periods. All signals include Entry, SL, and TP parameters, so you can copy them in any time zone."
-    },
-    {
-        "intent": "mentorship_models",
-        "triggers": [r"what is mentorship", r"coaching details", r"training content"],
-        "response": "VIP Group Mentorship ($200) covers access to educational materials, group Q&A, and market breakdowns. 1-on-1 Private Mentorship ($800) is personalized coaching, live trade monitoring, and direct line access."
-    },
-    {
-        "intent": "mentorship_one_on_one",
-        "triggers": [r"1 on 1 specifics", r"personal mentor", r"direct access"],
-        "response": "Intensive training on my personal model, live calls with me, personal market insights, weekend summaries, direct monitoring and correction of your shared trades, and access to my personal skill and experience at arranged meeting times."
-    },
-    {
-        "intent": "prop_challenge_support",
-        "triggers": [r"\bftmo\b", r"prop firm", r"funded pips", r"pass challenge"],
-        "response": "Dedicated guidance to help you pass prop firm challenges using signals formatted for strict prop risk parameters. Select 'Passing Prop Challenges' to get started."
-    },
-    {
-        "intent": "weekly_analysis_details",
-        "triggers": [r"weekly analysis", r"chart breakdowns", r"what do i get in weekly"],
-        "response": "Includes deep multi-timeframe structural analysis on Gold, key institutional liquidity zones, and my personal market outlook delivered weekly to keep you prepared."
-    },
-    {
-        "intent": "strategy_inquiry",
-        "triggers": [r"what strategy", r"strategy details", r"teach me strategy", r"explain strategy"],
-        "response": "Sorry, I cannot discuss the intimate details of my private strategy or model for free. To access that information and my extensive skills and experience, you must join my VIP community first."
-    },
-    {
-        "intent": "win_rate_accuracy",
-        "triggers": [r"win rate", r"accuracy", r"success rate", r"losing trades"],
-        "response": "While no strategy wins 100% of the time, I maintain a consistent 75%+ win rate. I focus on giving you real market value and information, protecting your account. You can count on my consistency and experience."
-    },
-    {
-        "intent": "guarantee_profits",
-        "triggers": [r"\bguarantee\b", r"sure money", r"sure profits", r"get rich quick"],
-        "response": "I cannot guarantee profits, and trading financial markets carries risk. Anyone promising guaranteed returns is likely a scammer. I do not offer a get rich quick strategy, but I promise after these 4 months, your trading journey will be on a very different level."
-    },
-    {
-        "intent": "drawdown_risk_management",
-        "triggers": [r"drawdown", r"max loss", r"how much risk", r"drawdown rules"],
-        "response": "Losses are inevitable. I do not use static percentage risk rules. Risk management is dynamic based entirely on my market setup and current price action. To grow a trading account, you must manage risk carefully, following the rules I provide to keep your account safe."
-    },
-    {
-        "intent": "minimum_capital",
-        "triggers": [r"minimum capital", r"how much money to start", r"starter balance"],
-        "response": "I specialize in Gold. You can start with as little as $100 on a standard broker, but utilize prop firm capital ($5k+) whenever possible to maximize returns while controlling your personal risk."
-    },
-    {
-        "intent": "markets_traded",
-        "triggers": [r"what markets", r"forex only", r"do you trade crypto", r"\bgold\b", r"xauusd"],
-        "response": "I specialize exclusively in Gold (XAUUSD). It is the single highest-probability asset I track, allowing me to maintain deep focus and superior results."
-    },
-    {
-        "intent": "newbie_suitability",
-        "triggers": [r"newbie", r"no experience", r"beginner suitability", r"total starter"],
-        "response": "You don't need prior experience. The VIP Signals are formatted simply so you can copy and paste them, and my Mentorship programs are designed to teach you step-by-step from zero."
-    },
-    {
-        "intent": "crypto_reasoning",
-        "triggers": [r"why only crypto", r"crypto payments", r"is card available", r"send to bank"],
-        "response": "I accept Cryptocurrency securely via Plisio for Bitcoin, Ethereum, Solana, and USDT. This is primarily because my community is global, and Crypto allows the fastest, safest, lowest-fee processing from any country without reliance on unstable international banking systems."
-    },
-    {
-        "intent": "usdt_network_warning",
-        "triggers": [r"\busdt\b", r"tether network", r"\berc20\b", r"\btrc20\b"],
-        "response": "IMPORTANT: If you are paying with USDT, you MUST use the TRON (TRC-20) network. This ensures the lowest gas fees and fastest verification. Sending via other networks like ERC-20 will result in permanent loss of your funds."
-    },
-    {
-        "intent": "accepted_payment_methods",
-        "triggers": [r"accepted payments", r"how to pay", r"can i pay paypal"],
-        "response": "I accept Cryptocurrency securely via Plisio (Bitcoin, Ethereum, Solana, and USDT). Crypto allows the fastest, safest processing from anywhere in the world without traditional bank delays or network failures. Tap the payment button in the menu to generate your direct checkout link."
-    },
-    {
-        "intent": "payment_verification",
-        "triggers": [r"sent payment", r"confirm payment", r"did you receive", r"verification", r"receipt", r"screenshot"],
-        "response": "The system automatically verifies your transaction on-chain (typically 5 to 30 mins). Once confirmed, the bot will instantly generate your unique VIP invite link. There is no need to send screenshots of your payment receipt."
-    },
-    {
-        "intent": "recommended_broker",
-        "triggers": [r"broker link", r"headway", r"regulated broker", r"goat funded"],
-        "response": "I partner with Headway for standard brokerage accounts. For prop firm capital challenges, I recommend Goat Funded, as I have consistently excellent results with their execution and drawdown rules."
-    },
-    {
-        "intent": "trading_platform",
-        "triggers": [r"\bmt4\b", r"\bmt5\b", r"platform", r"metatrader", r"tradingview"],
-        "response": "My signals are executed on MetaTrader 5 (MT5), which provides the speed and tools I need for Gold. For deep chart analysis and preparation, I use and recommend TradingView."
-    },
-    {
-        "intent": "signal_execution",
-        "triggers": [r"how do i copy", r"input signals", r"instruction"],
-        "response": "Open XAUUSD on MT5, select the order type (Buy/Sell), carefully input the exact SL and TP prices I provide, and click execute."
-    },
-    {
-        "intent": "identity_verification",
-        "triggers": [r"are you real", r"is this scam", r"trustworthy", r"\blegit\b", r"real mentor"],
-        "response": "Yes, I am real. My reputation is built on pure market value, consistency, and the results of my members. You can follow my setups, check my public channel recaps, and see the breakdown for yourself. I focus 100% of my energy on chart analysis and delivering value to my group."
-    },
-    {
-        "intent": "proof_of_results",
-        "triggers": [r"proof of profits", r"trade screenshots", r"withdrawals"],
-        "response": "I post regular trade recaps, weekend market reviews, and client success feedback in my public channel. I prioritize real market information over flash, and I assure you after 4 months with me, your journey will be on a very different level."
-    },
-    {
-        "intent": "contact_fallback",
-        "triggers": [r"\bhelp\b", r"\boptions\b", r"talk to human", r"human support"],
-        "response": "Use the /start menu to access pricing and services. If you have a complex technical question, just type it clearly in one message, and I will reply as soon as possible."
-    },
-    {
-        "intent": "broker_regulation",
-        "triggers": [r"regulated prop", r"broker regulated", r"safety of broker"],
-        "response": "I do not operate as a broker or liquidity provider. I recommend Headway as a reputable brokerage."
-    },
-    {
-        "intent": "multiple_accounts",
-        "triggers": [r"multiple accounts", r"share signals", r"ban policy"],
-        "response": "A single VIP subscription grants access for one user only. Sharing signals, account forwarding, or access sharing will result in an immediate permanent ban without refund."
-    },
-    {
-        "intent": "refund_policy",
-        "triggers": [r"money back", r"unhappy", r"refund policy", r"cancellation"],
-        "response": "Due to the dynamic nature of digital services, signals, and private mentorship coaching, I maintain a strict No Refunds policy once access is granted."
-    }
-]
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+async def simulate_typing(context: ContextTypes.DEFAULT_TYPE, chat_id: int, duration_seconds: int):
+    """Shows continuous typing status in the header for specified duration."""
+    elapsed = 0
+    while elapsed < duration_seconds:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass
+        sleep_time = min(4, duration_seconds - elapsed)
+        await asyncio.sleep(sleep_time)
+        elapsed += sleep_time
 
-IMPATIENCE_PATTERN = re.compile(r"(\?{2,}|hello\??|🙄|please reply|sir\??|are you there)", re.IGNORECASE)
-
-def generate_plisio_link(user_id: int, service_name: str, price: int) -> str:
+def generate_crypto_link(user_id: int, service_name: str, price: int) -> str:
+    """Generates direct crypto invoice link behind the scenes."""
     if not PLISIO_API_KEY:
-        logger.error("PLISIO_API_KEY is missing from environment variables.")
         return f"https://plisio.net/pay/checkout_{user_id}"
 
     url = "https://api.plisio.net/api/v1/invoices/new"
@@ -235,20 +91,19 @@ def generate_plisio_link(user_id: int, service_name: str, price: int) -> str:
         "currency": "USD",
         "order_name": f"SP Trading - {service_name}",
         "order_number": f"{user_id}_{int(time.time())}",
-        "callback_url": "https://yourdomain.com/plisio_webhook"
     }
     try:
         res = requests.get(url, params=params, timeout=10).json()
         if res.get("status") == "success":
             return res["data"]["invoice_url"]
     except Exception as e:
-        logger.error(f"Plisio API error: {e}")
+        logger.error(f"Crypto invoice API error: {e}")
     
     return f"https://plisio.net/pay/checkout_{user_id}"
 
 async def update_admin_log_card(context: ContextTypes.DEFAULT_TYPE, user_id: int, user_handle: str, new_entry: str):
+    """Updates permanent conversation log card in admin chat."""
     if not ADMIN_CHAT_ID:
-        logger.error("ADMIN_CHAT_ID is missing from environment variables.")
         return
 
     state = get_user_state(user_id)
@@ -256,7 +111,7 @@ async def update_admin_log_card(context: ContextTypes.DEFAULT_TYPE, user_id: int
     
     header = (
         f"<b>CONVERSATION LOG:</b> {user_handle} (ID: <code>{user_id}</code>)\n"
-        f"<b>Exp:</b> {state['experience']} | <b>Interest:</b> {state['service']}\n"
+        f"<b>Exp:</b> {state['experience']} | <b>Selected:</b> {state['service']}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     )
     
@@ -299,17 +154,95 @@ async def update_admin_log_card(context: ContextTypes.DEFAULT_TYPE, user_id: int
             )
             state["admin_card_id"] = msg.message_id
 
+# ==========================================
+# AUTO-REPLY KNOWLEDGE BASE (FIRST PERSON)
+# ==========================================
+FAQ_KNOWLEDGE_BASE = [
+    {
+        "intent": "payment_options",
+        "triggers": [r"how to pay", r"how do i pay", r"\bpayment\b", r"accept crypto", r"\bcrypto\b", r"\busdt\b", r"\bbtc\b", r"\beth\b", r"\bsol\b", r"pay with"],
+        "response": "I accept major cryptocurrencies including USDT (TRC-20 / ERC-20), Bitcoin (BTC), Ethereum (ETH), and Solana (SOL).\n\nSimply tap the payment button above under your selected service to open your direct crypto checkout!"
+    },
+    {
+        "intent": "pricing_rates",
+        "triggers": [r"\bprice\b", r"\bpricing\b", r"\brate\b", r"\brates\b", r"\bcost\b", r"how much", r"\bfee\b", r"\bcharge\b"],
+        "response": "Here are my current Ember Promo rates:\n• VIP Signals: $200 (4 Months Access)\n• Prop Firm Passing: $200\n• Prop Firm Management: $800\n• 1-on-1 Mentorship: $800\n• Signals + Mentorship Bundle: $800\n\nYou can pick your package directly from the main menu!"
+    },
+    {
+        "intent": "authenticity_proof",
+        "triggers": [r"are you real", r"how do i know", r"\bproof\b", r"\bresults\b", r"win rate", r"track record", r"\bscam\b", r"\blegit\b"],
+        "response": "My reputation is built on pure market value, consistency, and the verified results of my students. You can follow my setups, check my public channel recaps, and review all breakdowns yourself. My entire focus is on chart analysis and delivering results."
+    },
+    {
+        "intent": "gold_focus",
+        "triggers": [r"\bgold\b", r"\bxauusd\b", r"\bpairs\b", r"\bforex\b", r"what do you trade"],
+        "response": "I trade exclusively Gold (XAUUSD). Every setup I post comes with explicit entry points, stop losses, and take profit targets based on high-confluence price action."
+    },
+    {
+        "intent": "mentorship_details",
+        "triggers": [r"mentorship", r"1 on 1", r"1v1", r"coaching", r"\blearn\b", r"\bteach\b"],
+        "response": "My 1-on-1 Mentorship gives you direct access to me, full strategy breakdowns, group call access, and personal guidance so you can master my Gold trading model step-by-step."
+    },
+    {
+        "intent": "prop_firm_passing",
+        "triggers": [r"prop firm", r"challenge", r"evaluation", r"\bpass\b", r"funding", r"\bftmo\b", r"goat funded"],
+        "response": "I assist you with passing prop firm evaluation challenges on Gold using strict risk management rules to get your account funded safely."
+    },
+    {
+        "intent": "prop_firm_management",
+        "triggers": [r"account management", r"manage my account", r"prop firm management", r"pass and manage"],
+        "response": "I offer professional prop firm account management on Gold. Once your account is funded, I execute setups strictly following risk parameters to build consistent gains and manage payouts."
+    },
+    {
+        "intent": "bundle_details",
+        "triggers": [r"\bbundle\b", r"signals and mentorship", r"\bcombo\b", r"package deal"],
+        "response": "The Bundle package gives you full access to both my VIP Gold signals for instant trade copying AND 1-on-1 Mentorship for deep price action breakdowns and direct guidance."
+    },
+    {
+        "intent": "access_duration",
+        "triggers": [r"duration", r"how long", r"access period", r"4 months", r"ember promo"],
+        "response": "The Ember Promo package grants you a full 4 months of continuous access to my service."
+    },
+    {
+        "intent": "broker_recommendation",
+        "triggers": [r"broker", r"spread", r"account type", r"leverage", r"where to trade"],
+        "response": "I recommend using low-spread brokers with tight spreads on XAUUSD so your execution matches my setups as closely as possible."
+    },
+    {
+        "intent": "signal_frequency",
+        "triggers": [r"how many signals", r"daily signals", r"frequency", r"trades per day"],
+        "response": "I focus on quality over quantity. I send high-confluence setups whenever the market presents clear structure and setup validation on Gold."
+    },
+    {
+        "intent": "beginners",
+        "triggers": [r"newbie", r"beginner", r"no experience", r"starter", r"new to trading"],
+        "response": "Beginners are fully welcome! My service is designed to be easy to follow whether you are copying setups or learning the market model from scratch."
+    },
+    {
+        "intent": "refund_terms",
+        "triggers": [r"refund", r"guarantee", r"money back"],
+        "response": "Due to the digital nature of my signals, mentorship, and trading insights, all sales are final once access is granted."
+    },
+    {
+        "intent": "human_contact",
+        "triggers": [r"talk to you", r"speak to sholly", r"admin", r"owner", r"human", r"\bdm\b"],
+        "response": "I have been notified! Give me just a moment and I will reply to you directly right here."
+    }
+]
+
+# ==========================================
+# COMMAND & CALLBACK HANDLERS
+# ==========================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    state = get_user_state(user.id)
     user_handle = f"@{user.username}" if user.username else user.first_name
+    get_user_state(user.id)
 
     welcome_text_1 = (
-        f"<b>Welcome! I'm Sholly Pee.</b>\n\n"
-        f"Most people enter these markets looking for quick gains, only to lose capital because they lack structure, patience, and real market guidance. "
-        f"I don't flaunt a fake lifestyle on social media to lure people in, my entire focus is giving maximum value, teaching real price action, and helping you scale consistently on Gold.\n\n"
-        f"Whether you're here to master my trading model, pass your prop firm challenges, or copy my high-confluence daily setups, this Ember Month program is built to take your trading journey to a completely different level before the year ends.\n\n"
-        f"<i>Trading involves risk. Proper risk management is advised.</i>"
+        f"👋 <b>Welcome! My name is Sholly Pee.</b>\n\n"
+        f"My entire focus is giving maximum value, teaching <b>real price action</b>, and helping you scale consistently on Gold.\n\n"
+        f"Whether you're here to master my trading model, pass your prop firm challenges, or copy my high-confluence daily setups, this program is built to take your trading journey to a completely different level before the year ends. 📈⚡\n\n"
+        f"> <i>I don't flaunt a fake lifestyle on social media to lure people in. You'll hardly see me do that, because my focus is strictly on delivering pure value.</i> 🏆"
     )
 
     try:
@@ -323,20 +256,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update_admin_log_card(context, user.id, user_handle, "<i>[User started the bot]</i>")
 
+    # 15-second typing delay before Welcome Part 2
+    await simulate_typing(context, user.id, 15)
+
     welcome_text_2 = (
-        "Feel free to type and ask me any questions, I reply to all DMs as soon as possible!\n\n"
-        "To help me serve you best and get you set up, please select your experience level below:"
+        f"⚠️ <b>Trading involves risk. Proper risk management is advised.</b>\n\n"
+        f"> <i>If you are looking for a flashy lifestyle or to make money quick, then unfortunately I can't help you. I believe in consistency, growth, and discipline.</i> 🎯\n\n"
+        f"I cannot promise instant wealth, but what I can confidently promise you is a <b>complete transformation</b> of your trading experience. I have guided multiple students to profitability, and all proof is fully verifiable across my socials. ✨\n\n"
+        f"To help me serve you best, please select your experience level below:"
     )
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔰 New to Trading", callback_data="exp_Newbie")],
-        [InlineKeyboardButton("📈 Intermediate", callback_data="exp_Intermediate")],
-        [InlineKeyboardButton("⚡ Advanced", callback_data="exp_Advanced")]
+        [InlineKeyboardButton("📈 Intermediate / Advanced", callback_data="exp_Intermediate")]
     ])
 
     await context.bot.send_message(
         chat_id=user.id,
         text=welcome_text_2,
+        parse_mode="HTML",
         reply_markup=keyboard
     )
 
@@ -354,15 +292,30 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await update_admin_log_card(context, user.id, user_handle, f"<b>Selected Exp:</b> {exp_level}")
 
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📊 VIP Signals", callback_data="srv_VIP Signals")],
-            [InlineKeyboardButton("👥 VIP Group Mentorship", callback_data="srv_VIP Group Mentorship")],
-            [InlineKeyboardButton("🤝 1-on-1 Mentorship", callback_data="srv_1-on-1 Mentorship")],
-            [InlineKeyboardButton("🏆 Passing Prop Challenges", callback_data="srv_Passing Prop Challenges")],
-            [InlineKeyboardButton("📝 WEEKLY CHART ANALYSIS", callback_data="srv_WEEKLY CHART ANALYSIS")]
+            [InlineKeyboardButton("📈 VIP Signals ($200)", callback_data="srv_VIP Signals")],
+            [InlineKeyboardButton("🤝 1-on-1 Mentorship ($800)", callback_data="srv_1-on-1 Mentorship")],
+            [InlineKeyboardButton("🛡️ Prop Firm Passing ($200)", callback_data="srv_Prop Firm Passing")],
+            [InlineKeyboardButton("💼 Prop Firm Management ($800)", callback_data="srv_Prop Firm Management")],
+            [InlineKeyboardButton("⚡ VIP Signals + Mentorship Bundle ($800)", callback_data="srv_Signals & Mentorship Bundle")]
         ])
 
         await query.edit_message_text(
-            text=f"Experience set to: <b>{exp_level}</b>\n\nNow, select the service you are interested in:",
+            text=f"Experience set to: <b>{exp_level}</b>\n\nSelect the service you are interested in:",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    elif data == "nav_services":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📈 VIP Signals ($200)", callback_data="srv_VIP Signals")],
+            [InlineKeyboardButton("🤝 1-on-1 Mentorship ($800)", callback_data="srv_1-on-1 Mentorship")],
+            [InlineKeyboardButton("🛡️ Prop Firm Passing ($200)", callback_data="srv_Prop Firm Passing")],
+            [InlineKeyboardButton("💼 Prop Firm Management ($800)", callback_data="srv_Prop Firm Management")],
+            [InlineKeyboardButton("⚡ VIP Signals + Mentorship Bundle ($800)", callback_data="srv_Signals & Mentorship Bundle")]
+        ])
+
+        await query.edit_message_text(
+            text="Select the service package you want to review:",
             parse_mode="HTML",
             reply_markup=keyboard
         )
@@ -371,30 +324,35 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         service_name = data.split("_")[1]
         state["service"] = service_name
         
-        if service_name == "1-on-1 Mentorship":
+        if service_name in ["1-on-1 Mentorship", "Prop Firm Management", "Signals & Mentorship Bundle"]:
             state["price"] = 800
         else:
             state["price"] = 200
 
         await update_admin_log_card(context, user.id, user_handle, f"<b>Selected Service:</b> {service_name} (${state['price']})")
 
-        checkout_url = generate_plisio_link(user.id, service_name, state["price"])
+        # 15-second typing delay before rendering Profile Summary card
+        await simulate_typing(context, user.id, 15)
+
+        checkout_url = generate_crypto_link(user.id, service_name, state["price"])
 
         summary_text = (
-            f"<b>Profile Summary:</b>\n"
+            f"📋 <b>Profile Summary:</b>\n"
             f"• <b>Experience:</b> {state['experience']}\n"
-            f"• <b>Service:</b> {service_name}\n"
+            f"• <b>Selected Service:</b> {service_name}\n"
             f"• <b>Promo Fee:</b> ${state['price']} (4 Months Access)\n\n"
-            f"Feel free to ask any question before completing your setup.\n"
+            f"Feel free to ask me any question before completing your setup.\n"
             f"<i>I reply to all DMs as soon as possible!</i>\n\n"
             f"Ready to proceed to payment?"
         )
 
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"💳 Pay ${state['price']} with Crypto (Plisio)", url=checkout_url)]
+            [InlineKeyboardButton(f"💳 Pay ${state['price']} with Crypto", url=checkout_url)],
+            [InlineKeyboardButton("« Back to Services", callback_data="nav_services")]
         ])
 
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=user.id,
             text=summary_text,
             parse_mode="HTML",
             reply_markup=keyboard
@@ -403,63 +361,101 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     elif data.startswith("admin_reply:"):
         target_user_id = int(data.split(":")[1])
         context.user_data["reply_target"] = target_user_id
-        await query.message.reply_text(
+        
+        msg = await query.message.reply_text(
             text=f"<b>Reply Mode Active:</b> Type your message below to send directly to user <code>{target_user_id}</code>.",
             parse_mode="HTML"
         )
+        # Track temporary prompt ID for deletion
+        get_user_state(target_user_id)["temp_alert_ids"].append(msg.message_id)
 
+# ==========================================
+# UNIVERSAL MESSAGE HANDLER
+# ==========================================
 async def universal_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_handle = f"@{user.username}" if user.username else user.first_name
     state = get_user_state(user.id)
 
+    # ------------------------------------------
+    # ADMIN REPLY MODE EXECUTION
+    # ------------------------------------------
     if user.id == ADMIN_CHAT_ID and "reply_target" in context.user_data:
         target_id = context.user_data.pop("reply_target")
+        target_state = get_user_state(target_id)
+        
+        # Deliver response to client and log permanently
         if update.message.text:
             await context.bot.send_message(chat_id=target_id, text=update.message.text)
             await update_admin_log_card(context, target_id, f"User {target_id}", f"<b>Sholly Pee:</b> {update.message.text}")
-            await update.message.reply_text("✅ Message delivered.")
+        elif update.message.photo:
+            photo_file_id = update.message.photo[-1].file_id
+            caption = update.message.caption or ""
+            await context.bot.send_photo(chat_id=target_id, photo=photo_file_id, caption=caption)
+            await update_admin_log_card(context, target_id, f"User {target_id}", f"<b>Sholly Pee:</b> <i>[Sent Photo 📷]</i> {caption}")
         elif update.message.voice:
             await context.bot.send_voice(chat_id=target_id, voice=update.message.voice.file_id)
             await update_admin_log_card(context, target_id, f"User {target_id}", "<b>Sholly Pee:</b> <i>[Sent Voice Note]</i>")
-            await update.message.reply_text("✅ Voice note delivered.")
+        elif update.message.document:
+            await context.bot.send_document(chat_id=target_id, document=update.message.document.file_id)
+            await update_admin_log_card(context, target_id, f"User {target_id}", "<b>Sholly Pee:</b> <i>[Sent Document 📄]</i>")
+
+        confirm_msg = await update.message.reply_text("✅ Message delivered.")
+
+        # Cleanup temporary prompts and banners (Keep sent media intact!)
+        if update.message.text:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
+        await asyncio.sleep(2)
+        try:
+            await confirm_msg.delete()
+        except Exception:
+            pass
+
+        for temp_id in target_state["temp_alert_ids"]:
+            try:
+                await context.bot.delete_message(chat_id=ADMIN_CHAT_ID, message_id=temp_id)
+            except Exception:
+                pass
+        target_state["temp_alert_ids"] = []
         return
 
+    # ------------------------------------------
+    # CLIENT INBOUND MEDIA HANDLING (PERMANENT)
+    # ------------------------------------------
     if update.message.voice or update.message.photo or update.message.document:
         caption = update.message.caption or ""
-        media_type = "Voice Note" if update.message.voice else ("Photo" if update.message.photo else "Document")
+        media_type = "Voice Note" if update.message.voice else ("Photo 📷" if update.message.photo else "Document 📄")
         
         await update_admin_log_card(context, user.id, user_handle, f"<b>{user_handle}:</b> <i>[Sent {media_type}]</i> {caption}")
         
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("💬 Reply to Client", callback_data=f"admin_reply:{user.id}")
-        ]])
-        
+        # Forward media permanently to admin chat
         await context.bot.forward_message(
             chat_id=ADMIN_CHAT_ID,
             from_chat_id=user.id,
             message_id=update.message.message_id
         )
-        await context.bot.send_message(
+        
+        # Sound alert ping (Temporary)
+        alert_msg = await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"Media received from {user_handle} (ID: <code>{user.id}</code>)",
-            parse_mode="HTML",
-            reply_markup=keyboard
+            text=f"🔔 <b>New {media_type} from {user_handle}</b> (ID: <code>{user.id}</code>)",
+            parse_mode="HTML"
         )
+        state["temp_alert_ids"].append(alert_msg.message_id)
         return
 
+    # ------------------------------------------
+    # CLIENT TEXT & KEYWORD MATCHING
+    # ------------------------------------------
     text = update.message.text
     if not text:
         return
 
     await update_admin_log_card(context, user.id, user_handle, f"<b>{user_handle}:</b> {text}")
-
-    if IMPATIENCE_PATTERN.search(text):
-        state["unmatched_count"] += 1
-        handoff_msg = "This is an automated response. I reply to all DMs as soon as possible!"
-        await update.message.reply_text(handoff_msg)
-        await update_admin_log_card(context, user.id, user_handle, f"<b>Bot (Handoff):</b> {handoff_msg}")
-        return
 
     matched_intent = None
     matched_response = None
@@ -475,40 +471,49 @@ async def universal_message_handler(update: Update, context: ContextTypes.DEFAUL
 
     current_time = time.time()
     if matched_intent:
-        if state["last_intent"] == matched_intent and (current_time - state["last_intent_time"]) < 50:
+        # Prevent rapid repetitive spam triggers
+        if state["last_intent"] == matched_intent and (current_time - state["last_intent_time"]) < 40:
             return
         
         state["last_intent"] = matched_intent
         state["last_intent_time"] = current_time
-        state["unmatched_count"] = 0
 
+        # 20-second typing delay for matched auto-replies
+        await simulate_typing(context, user.id, 20)
         await update.message.reply_text(matched_response)
-        await update_admin_log_card(context, user.id, user_handle, f"<b>Bot:</b> {matched_response}")
+        await update_admin_log_card(context, user.id, user_handle, f"<b>Sholly Pee:</b> {matched_response}")
         return
 
-    state["unmatched_count"] += 1
-    if state["unmatched_count"] >= 4:
-        handoff_msg = "This is an automated response. I reply to all DMs as soon as possible!"
-        await update.message.reply_text(handoff_msg)
-        await update_admin_log_card(context, user.id, user_handle, f"<b>Bot (Handoff):</b> {handoff_msg}")
-        state["unmatched_count"] = 0
+    # ------------------------------------------
+    # SILENT FALLBACK FOR UNMATCHED QUESTIONS
+    # ------------------------------------------
+    # Bot stays completely silent. Only alerts admin via temporary sound ping.
+    alert_msg = await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=f"🔔 <b>New message from {user_handle}:</b> \"{text}\"",
+        parse_mode="HTML"
+    )
+    state["temp_alert_ids"].append(alert_msg.message_id)
 
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
 def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is missing! Set it in Render Environment variables.")
         return
 
-    # 1. Start Flask dummy web server on a background thread
+    # 1. Start background thread for Render Flask web server keep-alive
     threading.Thread(target=start_flask_server, daemon=True).start()
 
-    # 2. Fix asyncio event loop for Python 3.10+ main thread execution
+    # 2. Configure asyncio event loop for thread safety
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    # 3. Build and start Telegram Application cleanly
+    # 3. Build and configure Telegram Application handlers
     telegram_app = Application.builder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start_command))
@@ -519,7 +524,7 @@ def main():
 
     logger.info("SP Assistant Bot started successfully.")
     
-    # 4. Run polling with explicit loop configuration
+    # 4. Start polling
     telegram_app.run_polling()
 
 if __name__ == "__main__":
