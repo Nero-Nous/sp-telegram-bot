@@ -238,7 +238,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_handle = f"@{user.username}" if user.username else user.first_name
     get_user_state(user.id)
 
-        welcome_text_1 = (
+    welcome_text_1 = (
         f"👋 <b>Welcome! My name is Sholly Pee.</b>\n\n"
         f"My entire focus is giving maximum value, teaching <b>real price action</b>, and helping you scale consistently on Gold.\n\n"
         f"Whether you're here to master my trading model, pass your prop firm challenges, or copy my high-confluence daily setups, this program is built to take your trading journey to a completely different level before the year ends. 📈⚡\n\n"
@@ -261,7 +261,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text_2 = (
         f"⚠️ <b>Trading involves risk. Proper risk management is advised.</b>\n\n"
-        f"> <i>If you are looking for a flashy lifestyle or to make money quick, then unfortunately I can't help you. I believe in consistency, growth, and discipline.</i> 🎯\n\n"
+        f"<blockquote><i>If you are looking for a flashy lifestyle or to make money quick, then unfortunately I can't help you. I believe in consistency, growth, and discipline.</i> 🎯</blockquote>\n\n"
         f"I cannot promise instant wealth, but what I can confidently promise you is a <b>complete transformation</b> of your trading experience. I have guided multiple students to profitability, and all proof is fully verifiable across my socials. ✨\n\n"
         f"To help me serve you best, please select your experience level below:"
     )
