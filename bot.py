@@ -87,8 +87,8 @@ def generate_crypto_link(user_id: int, service_name: str, price: int) -> str:
     url = "https://api.plisio.net/api/v1/invoices/new"
     params = {
         "api_key": PLISIO_API_KEY,
-        "amount": str(price),
-        "currency": "USD",
+        "source_amount": str(price),
+        "source_currency": "USD",
         "order_name": f"SP Trading - {service_name}",
         "order_number": f"{user_id}_{int(time.time())}",
     }
