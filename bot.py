@@ -238,11 +238,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_handle = f"@{user.username}" if user.username else user.first_name
     get_user_state(user.id)
 
-    welcome_text_1 = (
+        welcome_text_1 = (
         f"👋 <b>Welcome! My name is Sholly Pee.</b>\n\n"
         f"My entire focus is giving maximum value, teaching <b>real price action</b>, and helping you scale consistently on Gold.\n\n"
         f"Whether you're here to master my trading model, pass your prop firm challenges, or copy my high-confluence daily setups, this program is built to take your trading journey to a completely different level before the year ends. 📈⚡\n\n"
-        f"> <i>I don't flaunt a fake lifestyle on social media to lure people in. You'll hardly see me do that, because my focus is strictly on delivering pure value.</i> 🏆"
+        f"<blockquote>I don't flaunt a fake lifestyle on social media to lure people in. You'll hardly see me do that, because my focus is strictly on delivering pure value. 🏆</blockquote>"
     )
 
     try:
